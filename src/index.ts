@@ -4,7 +4,7 @@ import { CHAIN_PRESETS } from './chains.js';
 import type { TokenSymbol } from './chains.js';
 import { WALLET_DAT } from './constants.js';
 import { decryptWithPassword, encryptWithPassword } from './crypto.js';
-import { findWallet, loadWalletFile, saveWalletFile } from './storage.js';
+import { findWallet, loadWalletFile, saveWalletFile, type StoredWallet } from './storage.js';
 import {
   askMnemonic,
   askNewWalletName,
@@ -29,6 +29,32 @@ const ERC20_ABI = [
   'function decimals() view returns (uint8)',
   'function balanceOf(address account) view returns (uint256)',
 ] as const;
+
+const PASSWORD_TRIES = 5;
+
+async function decryptPayloadWithRetries(
+  entry: StoredWallet,
+  passwordPrompt: string,
+): Promise<string | null> {
+  for (let attempt = 1; attempt <= PASSWORD_TRIES; attempt++) {
+    const prompt =
+      attempt === 1
+        ? passwordPrompt
+        : `${passwordPrompt} (${attempt}/${PASSWORD_TRIES})`;
+    const password = await askPasswordLine(prompt);
+    if (password == null) return null;
+    try {
+      return decryptWithPassword(entry.payload, password);
+    } catch {
+      if (attempt < PASSWORD_TRIES) {
+        bad('Wrong password.');
+      } else {
+        bad('Wrong password. No more attempts.');
+      }
+    }
+  }
+  return null;
+}
 
 async function askPasswordPair(): Promise<string | null> {
   const p1 = await askPasswordLine('Password:');
@@ -56,15 +82,12 @@ async function withUnlockedWallet<T>(
     bad(`Wallet "${name}" not found.`);
     return null;
   }
-  const password = await askPasswordLine(`Password for "${name}":`);
-  if (password == null) return null;
-  let phrase: string | undefined;
-  try {
-    phrase = decryptWithPassword(entry.payload, password);
-  } catch {
-    bad('Wrong password or corrupted data.');
-    return null;
-  }
+  const phraseMaybe = await decryptPayloadWithRetries(
+    entry,
+    `Password for "${name}":`,
+  );
+  if (phraseMaybe == null) return null;
+  let phrase: string | undefined = phraseMaybe;
   let wallet: ethers.Wallet;
   try {
     wallet = walletFromMnemonicStripped(phrase);
@@ -149,15 +172,12 @@ async function cmdSeed(name: string): Promise<void> {
     bad(`Wallet "${name}" not found.`);
     return;
   }
-  const password = await askPasswordLine(`Password for "${name}":`);
-  if (password == null) return;
-  let phrase: string | undefined;
-  try {
-    phrase = decryptWithPassword(entry.payload, password);
-  } catch {
-    bad('Wrong password or corrupted data.');
-    return;
-  }
+  const phraseMaybe = await decryptPayloadWithRetries(
+    entry,
+    `Password for "${name}":`,
+  );
+  if (phraseMaybe == null) return;
+  let phrase: string | undefined = phraseMaybe;
   try {
     walletFromMnemonicStripped(phrase);
   } catch {
@@ -178,12 +198,10 @@ async function cmdDelete(name: string): Promise<void> {
   }
   const sure = await confirmDelete(name);
   if (sure == null || !sure) return;
-  const password = await askPasswordLine('Password (confirm delete):');
-  if (password == null) return;
-  try {
-    decryptWithPassword(entry.payload, password);
-  } catch {
-    bad('Wrong password.');
+  if (
+    (await decryptPayloadWithRetries(entry, 'Password (confirm delete):')) ==
+    null
+  ) {
     return;
   }
   data.wallets = data.wallets.filter((w) => w.name !== name);

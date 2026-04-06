@@ -1,0 +1,389 @@
+import { ethers, HDNodeWallet } from 'ethers';
+import ora from 'ora';
+import { CHAIN_PRESETS } from './chains.js';
+import type { TokenSymbol } from './chains.js';
+import { WALLET_DAT } from './constants.js';
+import { decryptWithPassword, encryptWithPassword } from './crypto.js';
+import { findWallet, loadWalletFile, saveWalletFile } from './storage.js';
+import {
+  askMnemonic,
+  askNewWalletName,
+  askPasswordLine,
+  confirmDelete,
+  inputAddress,
+  inputAmountNative,
+  inputAmountToken,
+  inputCustomRpcAndToken,
+  inputRpc,
+  pickWallet,
+  pressEnter,
+  promptMenu,
+  selectNetwork,
+  selectToken,
+} from './prompts.js';
+import { bad, banner, note, ok, warn } from './ui.js';
+import { walletFromMnemonicStripped } from './wallet.js';
+
+const ERC20_ABI = [
+  'function transfer(address to, uint256 amount) returns (bool)',
+  'function decimals() view returns (uint8)',
+  'function balanceOf(address account) view returns (uint256)',
+] as const;
+
+async function askPasswordPair(): Promise<string | null> {
+  const p1 = await askPasswordLine('Password:');
+  if (p1 == null) return null;
+  if (!p1) {
+    bad('Password cannot be empty.');
+    return null;
+  }
+  const p2 = await askPasswordLine('Repeat password:');
+  if (p2 == null) return null;
+  if (p1 !== p2) {
+    bad('Passwords do not match.');
+    return null;
+  }
+  return p1;
+}
+
+async function withUnlockedWallet<T>(
+  name: string,
+  fn: (wallet: ethers.Wallet) => Promise<T>,
+): Promise<T | null> {
+  const data = loadWalletFile(WALLET_DAT);
+  const entry = findWallet(data, name);
+  if (!entry) {
+    bad(`Wallet "${name}" not found.`);
+    return null;
+  }
+  const password = await askPasswordLine(`Password for "${name}":`);
+  if (password == null) return null;
+  let phrase: string | undefined;
+  try {
+    phrase = decryptWithPassword(entry.payload, password);
+  } catch {
+    bad('Wrong password or corrupted data.');
+    return null;
+  }
+  let wallet: ethers.Wallet;
+  try {
+    wallet = walletFromMnemonicStripped(phrase);
+  } catch {
+    bad('Stored secret is not a valid mnemonic.');
+    phrase = undefined;
+    return null;
+  }
+  phrase = undefined;
+  return fn(wallet);
+}
+
+async function cmdCreate(name: string): Promise<void> {
+  const data = loadWalletFile(WALLET_DAT);
+  if (findWallet(data, name)) {
+    bad(`Wallet "${name}" already exists.`);
+    return;
+  }
+  const w = ethers.Wallet.createRandom();
+  const phrase = w.mnemonic?.phrase;
+  if (!phrase) {
+    bad('Failed to generate mnemonic.');
+    return;
+  }
+  const address = w.address;
+  const password = await askPasswordPair();
+  if (!password) return;
+  const payload = encryptWithPassword(phrase, password);
+  data.wallets.push({ name, payload });
+  saveWalletFile(WALLET_DAT, data);
+  ok('Wallet saved.');
+  note(`Address: ${address}`);
+}
+
+async function cmdImport(name: string): Promise<void> {
+  const data = loadWalletFile(WALLET_DAT);
+  if (findWallet(data, name)) {
+    bad(`Wallet "${name}" already exists.`);
+    return;
+  }
+  const phraseRaw = await askMnemonic();
+  if (phraseRaw == null) return;
+  let hd: HDNodeWallet;
+  try {
+    hd = HDNodeWallet.fromPhrase(phraseRaw.normalize('NFKD').trim());
+  } catch {
+    bad('Invalid mnemonic.');
+    return;
+  }
+  const password = await askPasswordPair();
+  if (!password) return;
+  const payload = encryptWithPassword(hd.mnemonic!.phrase, password);
+  data.wallets.push({ name, payload });
+  saveWalletFile(WALLET_DAT, data);
+  ok('Wallet imported.');
+  note(`Address: ${hd.address}`);
+}
+
+function cmdList(): void {
+  const data = loadWalletFile(WALLET_DAT);
+  if (data.wallets.length === 0) {
+    note('No wallets yet.');
+    return;
+  }
+  note('Saved wallets:');
+  data.wallets.forEach((w, i) => {
+    console.log(`  ${i + 1}. ${w.name}`);
+  });
+}
+
+async function cmdAddress(name: string): Promise<void> {
+  await withUnlockedWallet(name, async (wallet) => {
+    note(`Address (${name}):`);
+    console.log(`  ${wallet.address}`);
+  });
+}
+
+async function cmdSeed(name: string): Promise<void> {
+  const data = loadWalletFile(WALLET_DAT);
+  const entry = findWallet(data, name);
+  if (!entry) {
+    bad(`Wallet "${name}" not found.`);
+    return;
+  }
+  const password = await askPasswordLine(`Password for "${name}":`);
+  if (password == null) return;
+  let phrase: string | undefined;
+  try {
+    phrase = decryptWithPassword(entry.payload, password);
+  } catch {
+    bad('Wrong password or corrupted data.');
+    return;
+  }
+  try {
+    walletFromMnemonicStripped(phrase);
+  } catch {
+    bad('Stored secret is not a valid mnemonic.');
+    return;
+  }
+  warn('Anyone with this phrase controls the wallet.');
+  console.log(`  ${phrase}`);
+  phrase = undefined;
+}
+
+async function cmdDelete(name: string): Promise<void> {
+  const data = loadWalletFile(WALLET_DAT);
+  const entry = findWallet(data, name);
+  if (!entry) {
+    bad(`Wallet "${name}" not found.`);
+    return;
+  }
+  const sure = await confirmDelete(name);
+  if (sure == null || !sure) return;
+  const password = await askPasswordLine('Password (confirm delete):');
+  if (password == null) return;
+  try {
+    decryptWithPassword(entry.payload, password);
+  } catch {
+    bad('Wrong password.');
+    return;
+  }
+  data.wallets = data.wallets.filter((w) => w.name !== name);
+  saveWalletFile(WALLET_DAT, data);
+  ok(`Removed "${name}" from ${WALLET_DAT}.`);
+}
+
+async function cmdSend(name: string): Promise<void> {
+  await withUnlockedWallet(name, async (wallet) => {
+    const rpcDefault = process.env.CLI_WALLET_RPC ?? 'https://rpc.sepolia.org';
+    const rpc = await inputRpc(rpcDefault);
+    if (rpc == null) return;
+    const provider = new ethers.JsonRpcProvider(rpc);
+    let natBal: bigint;
+    try {
+      natBal = await provider.getBalance(wallet.address);
+    } catch {
+      bad('Could not read balance. Check the RPC URL.');
+      return;
+    }
+    note(`From: ${wallet.address}`);
+    note(`Native balance: ${ethers.formatEther(natBal)} (keep some for gas)`);
+
+    const to = await inputAddress('Recipient address:');
+    if (to == null) return;
+    const amountStr = await inputAmountNative('Amount (native coin, e.g. 0.01):');
+    if (amountStr == null) return;
+    const value = ethers.parseEther(amountStr.trim());
+    if (value > natBal) {
+      bad('Amount exceeds balance (gas not included in this check).');
+      return;
+    }
+
+    const signer = wallet.connect(provider);
+    const spinner = ora('Sending transaction…').start();
+    try {
+      const tx = await signer.sendTransaction({ to, value });
+      spinner.text = `Confirming ${tx.hash.slice(0, 12)}…`;
+      await tx.wait();
+      spinner.succeed('Confirmed.');
+      note(`Tx: ${tx.hash}`);
+    } catch (e) {
+      spinner.fail('Transaction failed.');
+      bad(e instanceof Error ? e.message : String(e));
+    }
+  });
+}
+
+async function cmdSendToken(name: string): Promise<void> {
+  await withUnlockedWallet(name, async (wallet) => {
+    const netSel = await selectNetwork();
+    if (netSel == null) return;
+
+    let rpc: string;
+    let tokenAddress: string;
+    let expectedChainId: bigint | undefined;
+
+    if (netSel.kind === 'custom') {
+      const custom = await inputCustomRpcAndToken();
+      if (custom == null) return;
+      rpc = custom.rpc;
+      tokenAddress = custom.token;
+    } else {
+      const preset = CHAIN_PRESETS[netSel.index];
+      if (!preset) {
+        bad('Invalid network choice.');
+        return;
+      }
+      expectedChainId = preset.chainId;
+      const available = (['USDT', 'USDC'] as TokenSymbol[]).filter((sym) => preset.tokens[sym]);
+      if (available.length === 0) {
+        bad('No tokens configured for this network.');
+        return;
+      }
+      const sym = await selectToken(available);
+      if (sym == null) return;
+      tokenAddress = ethers.getAddress(preset.tokens[sym]!);
+      const rpcDefault = process.env.CLI_WALLET_RPC ?? preset.rpcDefault;
+      const rpcIn = await inputRpc(rpcDefault);
+      if (rpcIn == null) return;
+      rpc = rpcIn;
+    }
+
+    const provider = new ethers.JsonRpcProvider(rpc);
+    if (expectedChainId !== undefined) {
+      try {
+        const net = await provider.getNetwork();
+        if (net.chainId !== expectedChainId) {
+          warn(`RPC reports chain ${net.chainId}; preset expected ${expectedChainId}.`);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const signer = wallet.connect(provider);
+    const contract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+    let decimals: number;
+    try {
+      const d = await contract.decimals();
+      decimals = Number(d);
+    } catch {
+      bad('Could not read token. Wrong contract or RPC?');
+      return;
+    }
+
+    let natBal: bigint;
+    let tokenBal: bigint;
+    try {
+      natBal = await provider.getBalance(wallet.address);
+      tokenBal = await contract.balanceOf(wallet.address);
+    } catch {
+      bad('Could not read balances.');
+      return;
+    }
+
+    note(`From: ${wallet.address}`);
+    note(`Native (gas): ${ethers.formatEther(natBal)}`);
+    note(`Token balance: ${ethers.formatUnits(tokenBal, decimals)}`);
+
+    const to = await inputAddress('Recipient address:');
+    if (to == null) return;
+    const amountStr = await inputAmountToken('Amount (token units):', decimals);
+    if (amountStr == null) return;
+    const value = ethers.parseUnits(amountStr.trim(), decimals);
+    if (value > tokenBal) {
+      bad('Amount exceeds token balance.');
+      return;
+    }
+    if (natBal === 0n) {
+      warn('Native balance is 0 — you may lack gas.');
+    }
+
+    const spinner = ora('Sending token transfer…').start();
+    try {
+      const tx = await contract.transfer(to, value);
+      spinner.text = `Confirming ${tx.hash.slice(0, 12)}…`;
+      await tx.wait();
+      spinner.succeed('Confirmed.');
+      note(`Tx: ${tx.hash}`);
+    } catch (e) {
+      spinner.fail('Transaction failed.');
+      bad(e instanceof Error ? e.message : String(e));
+    }
+  });
+}
+
+async function runMenu(): Promise<void> {
+  banner();
+  while (true) {
+    const action = await promptMenu();
+    if (action == null || action === 'exit') {
+      note('Goodbye.');
+      break;
+    }
+
+    switch (action) {
+      case 'create': {
+        const name = await askNewWalletName();
+        if (name) await cmdCreate(name);
+        break;
+      }
+      case 'import': {
+        const name = await askNewWalletName();
+        if (name) await cmdImport(name);
+        break;
+      }
+      case 'list':
+        cmdList();
+        break;
+      case 'address': {
+        const name = await pickWallet('Which wallet?');
+        if (name) await cmdAddress(name);
+        break;
+      }
+      case 'seed': {
+        const name = await pickWallet('Which wallet?');
+        if (name) await cmdSeed(name);
+        break;
+      }
+      case 'sendNative': {
+        const name = await pickWallet('Send native — which wallet?');
+        if (name) await cmdSend(name);
+        break;
+      }
+      case 'sendToken': {
+        const name = await pickWallet('Send token — which wallet?');
+        if (name) await cmdSendToken(name);
+        break;
+      }
+      case 'delete': {
+        const name = await pickWallet('Delete — which wallet?');
+        if (name) await cmdDelete(name);
+        break;
+      }
+      default:
+        break;
+    }
+    await pressEnter();
+  }
+}
+
+void runMenu();

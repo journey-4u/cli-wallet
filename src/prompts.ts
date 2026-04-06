@@ -190,11 +190,15 @@ export async function inputAmountToken(
   }
 }
 
-export async function selectNetwork(): Promise<
+export async function selectNetwork(options?: {
+  customChoiceName?: string;
+}): Promise<
   | { kind: 'preset'; index: number }
   | { kind: 'custom' }
   | null
 > {
+  const customLabel =
+    options?.customChoiceName ?? 'Custom RPC + token contract';
   try {
     const v = await select<string>({
       message: 'Network',
@@ -205,13 +209,25 @@ export async function selectNetwork(): Promise<
           name: `${p.name} (chain ${p.chainId})`,
         })),
         new Separator(),
-        { value: 'custom', name: 'Custom RPC + token contract' },
+        { value: 'custom', name: customLabel },
       ],
     });
     if (v === 'custom') return { kind: 'custom' };
     const m = /^preset:(\d+)$/.exec(v);
     if (!m) return null;
     return { kind: 'preset', index: Number(m[1]) };
+  } catch {
+    return null;
+  }
+}
+
+export async function inputRpcOnly(): Promise<string | null> {
+  try {
+    const rpc = await input({
+      message: 'RPC URL:',
+      validate: (v) => v.trim().length > 0 || 'Required',
+    });
+    return rpc.trim();
   } catch {
     return null;
   }

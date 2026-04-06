@@ -15,6 +15,7 @@ import {
   inputAmountToken,
   inputCustomRpcAndToken,
   inputRpc,
+  inputRpcOnly,
   pickWallet,
   pressEnter,
   promptMenu,
@@ -211,10 +212,43 @@ async function cmdDelete(name: string): Promise<void> {
 
 async function cmdSend(name: string): Promise<void> {
   await withUnlockedWallet(name, async (wallet) => {
-    const rpcDefault = process.env.CLI_WALLET_RPC ?? 'https://rpc.sepolia.org';
-    const rpc = await inputRpc(rpcDefault);
-    if (rpc == null) return;
+    const netSel = await selectNetwork({
+      customChoiceName: 'Custom RPC only (any chain)',
+    });
+    if (netSel == null) return;
+
+    let rpc: string;
+    let expectedChainId: bigint | undefined;
+
+    if (netSel.kind === 'custom') {
+      const rpcIn = await inputRpcOnly();
+      if (rpcIn == null) return;
+      rpc = rpcIn;
+    } else {
+      const preset = CHAIN_PRESETS[netSel.index];
+      if (!preset) {
+        bad('Invalid network choice.');
+        return;
+      }
+      expectedChainId = preset.chainId;
+      const rpcDefault = process.env.CLI_WALLET_RPC ?? preset.rpcDefault;
+      const rpcIn = await inputRpc(rpcDefault);
+      if (rpcIn == null) return;
+      rpc = rpcIn;
+    }
+
     const provider = new ethers.JsonRpcProvider(rpc);
+    if (expectedChainId !== undefined) {
+      try {
+        const net = await provider.getNetwork();
+        if (net.chainId !== expectedChainId) {
+          warn(`RPC reports chain ${net.chainId}; preset expected ${expectedChainId}.`);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
     let natBal: bigint;
     try {
       natBal = await provider.getBalance(wallet.address);

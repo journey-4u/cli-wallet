@@ -354,7 +354,7 @@ async function cmdSendToken(name: string): Promise<void> {
 
     note(`From: ${maskAddress(wallet.address)}`);
     note(`🪙: ${ethers.formatEther(natBal)}`);
-    note(`💵: ${(Number(ethers.formatUnits(tokenBal, decimals)) / 1000).toFixed(2)}`);
+    note(`💵: ${(Number(ethers.formatUnits(tokenBal, decimals)) / 1000).toFixed(6)}`);
 
     const to = await inputAddress('Recipient 📫:');
     if (to == null) return;

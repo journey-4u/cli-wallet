@@ -5,7 +5,7 @@ import { CHAIN_PRESETS } from './chains.js';
 import type { TokenSymbol } from './chains.js';
 import { WALLET_DAT } from './constants.js';
 import { findWallet, loadWalletFile } from './storage.js';
-import { bad } from './ui.js';
+import { bad, maskAddress } from './ui.js';
 
 export type MenuAction =
   | 'create'
@@ -25,17 +25,17 @@ export async function promptMenu(): Promise<MenuAction | null> {
       pageSize: 14,
       loop: true,
       choices: [
-        { value: 'create', name: 'Create a new wallet' },
-        { value: 'import', name: 'Import wallet from mnemonic' },
-        { value: 'list', name: 'List wallets' },
+        { value: 'create', name: 'Create a new 👛' },
+        { value: 'import', name: 'Import 👛 from 🌱' },
+        { value: 'list', name: 'List 👛' },
         new Separator('─'),
-        { value: 'address', name: 'Show address' },
-        { value: 'seed', name: 'Show seed phrase' },
+        { value: 'address', name: 'Show 📫' },
+        { value: 'seed', name: 'Show 🌱' },
         new Separator('─'),
-        { value: 'sendNative', name: 'Send native coin (ETH, BNB, …)' },
-        { value: 'sendToken', name: 'Send USDT / USDC (ERC-20)' },
+        { value: 'sendNative', name: 'Send 🪙' },
+        { value: 'sendToken', name: 'Send 💵' },
         new Separator('─'),
-        { value: 'delete', name: 'Delete wallet' },
+        { value: 'delete', name: 'Delete 👛' },
         { value: 'exit', name: 'Exit' },
       ],
     });
@@ -48,7 +48,7 @@ export async function pickWallet(heading: string): Promise<string | null> {
   const data = loadWalletFile(WALLET_DAT);
   const names = data.wallets.map((w) => w.name);
   if (names.length === 0) {
-    bad('No saved wallets yet. Create or import one first.');
+    bad('No saved 👛 yet. Create or import one first.');
     return null;
   }
   try {
@@ -63,12 +63,12 @@ export async function pickWallet(heading: string): Promise<string | null> {
     });
     if (choice === '__other') {
       const name = await input({
-        message: 'Wallet name:',
+        message: '👛 name:',
         validate: (v) => v.trim().length > 0 || 'Name is required',
       });
       const trimmed = name.trim();
       if (!findWallet(data, trimmed)) {
-        bad(`No wallet named "${trimmed}".`);
+        bad(`No 👛 named "${trimmed}".`);
         return null;
       }
       return trimmed;
@@ -82,7 +82,7 @@ export async function pickWallet(heading: string): Promise<string | null> {
 export async function askNewWalletName(): Promise<string | null> {
   try {
     const name = await input({
-      message: 'Wallet name (label on this device only):',
+      message: '👛 name (label on this device only):',
       validate: (v) => v.trim().length > 0 || 'Name is required',
     });
     return name.trim();
@@ -106,7 +106,7 @@ export async function askPasswordLine(message: string): Promise<string | null> {
 export async function askMnemonic(): Promise<string | null> {
   try {
     const phrase = await input({
-      message: 'Mnemonic (12 or 24 words — paste is OK):',
+      message: '🌱 (12 or 24 words — paste is OK):',
       validate: (v) => v.trim().length > 0 || 'Required',
     });
     return phrase;
@@ -129,7 +129,7 @@ export async function confirmDelete(name: string): Promise<boolean | null> {
 export async function inputRpc(defaultUrl: string): Promise<string | null> {
   try {
     const rpc = await input({
-      message: 'RPC URL:',
+      message: '🌐 URL:',
       default: defaultUrl,
     });
     return rpc.trim() || defaultUrl;
@@ -143,7 +143,11 @@ export async function inputAddress(message: string): Promise<string | null> {
     const raw = await input({
       message,
       validate: (v) =>
-        ethers.isAddress(v.trim()) || 'Enter a valid 0x address',
+        ethers.isAddress(v.trim()) || 'Enter a valid 0x 📫',
+      transformer: (v, { isFinal }) =>
+        isFinal && ethers.isAddress(v.trim())
+          ? maskAddress(ethers.getAddress(v.trim()))
+          : v,
     });
     return ethers.getAddress(raw.trim());
   } catch {
@@ -181,7 +185,7 @@ export async function inputAmountToken(
           ethers.parseUnits(v.trim(), decimals);
           return true;
         } catch {
-          return 'Invalid amount for this token';
+          return 'Invalid amount for this 💵';
         }
       },
     });
@@ -198,10 +202,10 @@ export async function selectNetwork(options?: {
   | null
 > {
   const customLabel =
-    options?.customChoiceName ?? 'Custom RPC + token contract';
+    options?.customChoiceName ?? 'Custom 🌐 + 💵 contract';
   try {
     const v = await select<string>({
-      message: 'Network',
+      message: '🌐',
       pageSize: 12,
       choices: [
         ...CHAIN_PRESETS.map((p, i) => ({
@@ -224,7 +228,7 @@ export async function selectNetwork(options?: {
 export async function inputRpcOnly(): Promise<string | null> {
   try {
     const rpc = await input({
-      message: 'RPC URL:',
+      message: '🌐 URL:',
       validate: (v) => v.trim().length > 0 || 'Required',
     });
     return rpc.trim();
@@ -237,7 +241,7 @@ export async function selectToken(symbols: TokenSymbol[]): Promise<TokenSymbol |
   if (symbols.length === 0) return null;
   try {
     return await select<TokenSymbol>({
-      message: 'Token',
+      message: '💵',
       choices: symbols.map((s) => ({ value: s, name: s })),
     });
   } catch {
@@ -251,11 +255,11 @@ export async function inputCustomRpcAndToken(): Promise<{
 } | null> {
   try {
     const rpc = await input({
-      message: 'RPC URL:',
+      message: '🌐 URL:',
       validate: (v) => v.trim().length > 0 || 'Required',
     });
     const token = await input({
-      message: 'Token contract address:',
+      message: '💵 contract 📫:',
       validate: (v) =>
         ethers.isAddress(v.trim()) || 'Invalid contract address',
     });

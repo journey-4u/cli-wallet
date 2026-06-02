@@ -22,7 +22,7 @@ import {
   selectNetwork,
   selectToken,
 } from './prompts.js';
-import { bad, banner, note, ok, warn } from './ui.js';
+import { bad, banner, maskAddress, note, ok, warn } from './ui.js';
 import { walletFromMnemonicStripped } from './wallet.js';
 
 const ERC20_ABI = [
@@ -80,7 +80,7 @@ async function withUnlockedWallet<T>(
   const data = loadWalletFile(WALLET_DAT);
   const entry = findWallet(data, name);
   if (!entry) {
-    bad(`Wallet "${name}" not found.`);
+    bad(`👛 "${name}" not found.`);
     return null;
   }
   const phraseMaybe = await decryptPayloadWithRetries(
@@ -93,7 +93,7 @@ async function withUnlockedWallet<T>(
   try {
     wallet = walletFromMnemonicStripped(phrase);
   } catch {
-    bad('Stored secret is not a valid mnemonic.');
+    bad('Stored secret is not a valid 🌱.');
     phrase = undefined;
     return null;
   }
@@ -104,13 +104,13 @@ async function withUnlockedWallet<T>(
 async function cmdCreate(name: string): Promise<void> {
   const data = loadWalletFile(WALLET_DAT);
   if (findWallet(data, name)) {
-    bad(`Wallet "${name}" already exists.`);
+    bad(`👛 "${name}" already exists.`);
     return;
   }
   const w = ethers.Wallet.createRandom();
   const phrase = w.mnemonic?.phrase;
   if (!phrase) {
-    bad('Failed to generate mnemonic.');
+    bad('Failed to generate 🌱.');
     return;
   }
   const address = w.address;
@@ -119,14 +119,14 @@ async function cmdCreate(name: string): Promise<void> {
   const payload = encryptWithPassword(phrase, password);
   data.wallets.push({ name, payload });
   saveWalletFile(WALLET_DAT, data);
-  ok('Wallet saved.');
-  note(`Address: ${address}`);
+  ok('👛 saved.');
+  note(`📫: ${maskAddress(address)}`);
 }
 
 async function cmdImport(name: string): Promise<void> {
   const data = loadWalletFile(WALLET_DAT);
   if (findWallet(data, name)) {
-    bad(`Wallet "${name}" already exists.`);
+    bad(`👛 "${name}" already exists.`);
     return;
   }
   const phraseRaw = await askMnemonic();
@@ -135,7 +135,7 @@ async function cmdImport(name: string): Promise<void> {
   try {
     hd = HDNodeWallet.fromPhrase(phraseRaw.normalize('NFKD').trim());
   } catch {
-    bad('Invalid mnemonic.');
+    bad('Invalid 🌱.');
     return;
   }
   const password = await askPasswordPair();
@@ -143,17 +143,17 @@ async function cmdImport(name: string): Promise<void> {
   const payload = encryptWithPassword(hd.mnemonic!.phrase, password);
   data.wallets.push({ name, payload });
   saveWalletFile(WALLET_DAT, data);
-  ok('Wallet imported.');
-  note(`Address: ${hd.address}`);
+  ok('👛 imported.');
+  note(`📫: ${maskAddress(hd.address)}`);
 }
 
 function cmdList(): void {
   const data = loadWalletFile(WALLET_DAT);
   if (data.wallets.length === 0) {
-    note('No wallets yet.');
+    note('No 👛 yet.');
     return;
   }
-  note('Saved wallets:');
+  note('Saved 👛:');
   data.wallets.forEach((w, i) => {
     console.log(`  ${i + 1}. ${w.name}`);
   });
@@ -161,7 +161,7 @@ function cmdList(): void {
 
 async function cmdAddress(name: string): Promise<void> {
   await withUnlockedWallet(name, async (wallet) => {
-    note(`Address (${name}):`);
+    note(`📫 (${name}):`);
     console.log(`  ${wallet.address}`);
   });
 }
@@ -170,7 +170,7 @@ async function cmdSeed(name: string): Promise<void> {
   const data = loadWalletFile(WALLET_DAT);
   const entry = findWallet(data, name);
   if (!entry) {
-    bad(`Wallet "${name}" not found.`);
+    bad(`👛 "${name}" not found.`);
     return;
   }
   const phraseMaybe = await decryptPayloadWithRetries(
@@ -182,10 +182,10 @@ async function cmdSeed(name: string): Promise<void> {
   try {
     walletFromMnemonicStripped(phrase);
   } catch {
-    bad('Stored secret is not a valid mnemonic.');
+    bad('Stored secret is not a valid 🌱.');
     return;
   }
-  warn('Anyone with this phrase controls the wallet.');
+  warn('Anyone with this 🌱 controls the 👛.');
   console.log(`  ${phrase}`);
   phrase = undefined;
 }
@@ -194,7 +194,7 @@ async function cmdDelete(name: string): Promise<void> {
   const data = loadWalletFile(WALLET_DAT);
   const entry = findWallet(data, name);
   if (!entry) {
-    bad(`Wallet "${name}" not found.`);
+    bad(`👛 "${name}" not found.`);
     return;
   }
   const sure = await confirmDelete(name);
@@ -213,7 +213,7 @@ async function cmdDelete(name: string): Promise<void> {
 async function cmdSend(name: string): Promise<void> {
   await withUnlockedWallet(name, async (wallet) => {
     const netSel = await selectNetwork({
-      customChoiceName: 'Custom RPC only (any chain)',
+      customChoiceName: 'Custom 🌐 only (any chain)',
     });
     if (netSel == null) return;
 
@@ -227,7 +227,7 @@ async function cmdSend(name: string): Promise<void> {
     } else {
       const preset = CHAIN_PRESETS[netSel.index];
       if (!preset) {
-        bad('Invalid network choice.');
+        bad('Invalid 🌐 choice.');
         return;
       }
       expectedChainId = preset.chainId;
@@ -242,7 +242,7 @@ async function cmdSend(name: string): Promise<void> {
       try {
         const net = await provider.getNetwork();
         if (net.chainId !== expectedChainId) {
-          warn(`RPC reports chain ${net.chainId}; preset expected ${expectedChainId}.`);
+          warn(`🌐 reports chain ${net.chainId}; preset expected ${expectedChainId}.`);
         }
       } catch {
         /* ignore */
@@ -253,32 +253,32 @@ async function cmdSend(name: string): Promise<void> {
     try {
       natBal = await provider.getBalance(wallet.address);
     } catch {
-      bad('Could not read balance. Check the RPC URL.');
+      bad('Could not read 💰. Check the 🌐 URL.');
       return;
     }
-    note(`From: ${wallet.address}`);
-    note(`Native balance: ${ethers.formatEther(natBal)} (keep some for gas)`);
+    note(`From: ${maskAddress(wallet.address)}`);
+    note(`🪙: ${ethers.formatEther(natBal)} (keep some for ⛽)`);
 
-    const to = await inputAddress('Recipient address:');
+    const to = await inputAddress('Recipient 📫:');
     if (to == null) return;
-    const amountStr = await inputAmountNative('Amount (native coin, e.g. 0.01):');
+    const amountStr = await inputAmountNative('Amount (🪙, e.g. 0.01):');
     if (amountStr == null) return;
     const value = ethers.parseEther(amountStr.trim());
     if (value > natBal) {
-      bad('Amount exceeds balance (gas not included in this check).');
+      bad('Amount exceeds 💰 (⛽ not included in this check).');
       return;
     }
 
     const signer = wallet.connect(provider);
-    const spinner = ora('Sending transaction…').start();
+    const spinner = ora('Sending 📝…').start();
     try {
       const tx = await signer.sendTransaction({ to, value });
       spinner.text = `Confirming ${tx.hash.slice(0, 12)}…`;
       await tx.wait();
       spinner.succeed('Confirmed.');
-      note(`Tx: ${tx.hash}`);
+      note(`📝: ${tx.hash}`);
     } catch (e) {
-      spinner.fail('Transaction failed.');
+      spinner.fail('📝 failed.');
       bad(e instanceof Error ? e.message : String(e));
     }
   });
@@ -301,13 +301,13 @@ async function cmdSendToken(name: string): Promise<void> {
     } else {
       const preset = CHAIN_PRESETS[netSel.index];
       if (!preset) {
-        bad('Invalid network choice.');
+        bad('Invalid 🌐 choice.');
         return;
       }
       expectedChainId = preset.chainId;
       const available = (['USDT', 'USDC'] as TokenSymbol[]).filter((sym) => preset.tokens[sym]);
       if (available.length === 0) {
-        bad('No tokens configured for this network.');
+        bad('No 💵 configured for this 🌐.');
         return;
       }
       const sym = await selectToken(available);
@@ -324,7 +324,7 @@ async function cmdSendToken(name: string): Promise<void> {
       try {
         const net = await provider.getNetwork();
         if (net.chainId !== expectedChainId) {
-          warn(`RPC reports chain ${net.chainId}; preset expected ${expectedChainId}.`);
+          warn(`🌐 reports chain ${net.chainId}; preset expected ${expectedChainId}.`);
         }
       } catch {
         /* ignore */
@@ -338,7 +338,7 @@ async function cmdSendToken(name: string): Promise<void> {
       const d = await contract.decimals();
       decimals = Number(d);
     } catch {
-      bad('Could not read token. Wrong contract or RPC?');
+      bad('Could not read 💵. Wrong contract or 🌐?');
       return;
     }
 
@@ -348,36 +348,36 @@ async function cmdSendToken(name: string): Promise<void> {
       natBal = await provider.getBalance(wallet.address);
       tokenBal = await contract.balanceOf(wallet.address);
     } catch {
-      bad('Could not read balances.');
+      bad('Could not read 💰.');
       return;
     }
 
-    note(`From: ${wallet.address}`);
-    note(`Native (gas): ${ethers.formatEther(natBal)}`);
-    note(`Token balance: ${ethers.formatUnits(tokenBal, decimals)}`);
+    note(`From: ${maskAddress(wallet.address)}`);
+    note(`🪙: ${ethers.formatEther(natBal)}`);
+    note(`💵: ${(Number(ethers.formatUnits(tokenBal, decimals)) / 1000).toFixed(2)}`);
 
-    const to = await inputAddress('Recipient address:');
+    const to = await inputAddress('Recipient 📫:');
     if (to == null) return;
-    const amountStr = await inputAmountToken('Amount (token units):', decimals);
+    const amountStr = await inputAmountToken('Amount (💵 units):', decimals);
     if (amountStr == null) return;
     const value = ethers.parseUnits(amountStr.trim(), decimals);
     if (value > tokenBal) {
-      bad('Amount exceeds token balance.');
+      bad('Amount exceeds 💵.');
       return;
     }
     if (natBal === 0n) {
-      warn('Native balance is 0 — you may lack gas.');
+      warn('🪙 is 0 — you may lack ⛽.');
     }
 
-    const spinner = ora('Sending token transfer…').start();
+    const spinner = ora('Sending 💵 transfer…').start();
     try {
       const tx = await contract.transfer(to, value);
       spinner.text = `Confirming ${tx.hash.slice(0, 12)}…`;
       await tx.wait();
       spinner.succeed('Confirmed.');
-      note(`Tx: ${tx.hash}`);
+      note(`📝: ${tx.hash}`);
     } catch (e) {
-      spinner.fail('Transaction failed.');
+      spinner.fail('📝 failed.');
       bad(e instanceof Error ? e.message : String(e));
     }
   });
@@ -407,27 +407,27 @@ async function runMenu(): Promise<void> {
         cmdList();
         break;
       case 'address': {
-        const name = await pickWallet('Which wallet?');
+        const name = await pickWallet('Which 👛?');
         if (name) await cmdAddress(name);
         break;
       }
       case 'seed': {
-        const name = await pickWallet('Which wallet?');
+        const name = await pickWallet('Which 👛?');
         if (name) await cmdSeed(name);
         break;
       }
       case 'sendNative': {
-        const name = await pickWallet('Send native — which wallet?');
+        const name = await pickWallet('Send 🪙 — which 👛?');
         if (name) await cmdSend(name);
         break;
       }
       case 'sendToken': {
-        const name = await pickWallet('Send token — which wallet?');
+        const name = await pickWallet('Send 💵 — which 👛?');
         if (name) await cmdSendToken(name);
         break;
       }
       case 'delete': {
-        const name = await pickWallet('Delete — which wallet?');
+        const name = await pickWallet('Delete — which 👛?');
         if (name) await cmdDelete(name);
         break;
       }
